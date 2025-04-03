@@ -13,6 +13,8 @@
 HELLO_EXPORT void hello();
 HELLO_EXPORT void hello_print_vector(const std::vector<std::string> &strings);
 
+HELLO_EXPORT std::string compose_message(const std::string& build_type, const std::string& extra_info);
+
 namespace persistent_file_queue {
 
   /**  Language codes to be used with the PersistentFileQueue class */

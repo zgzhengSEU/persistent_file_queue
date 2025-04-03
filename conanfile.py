@@ -1,3 +1,5 @@
+import os
+
 from conan import ConanFile
 from conan.tools.cmake import CMakeToolchain, CMake, cmake_layout, CMakeDeps
 
@@ -5,14 +7,14 @@ from conan.tools.cmake import CMakeToolchain, CMake, cmake_layout, CMakeDeps
 class PersistentFileQueueRecipe(ConanFile):
     name = "persistent_file_queue"
     version = "1.0"
-    package_type = "library"
+    # package_type = "library"
 
     # Optional metadata
-    license = "<Put the package license here>"
-    author = "<Put your name here> <And your email here>"
-    url = "<Package recipe repository url here, for issues about the package>"
-    description = "<Description of hello package here>"
-    topics = ("<Put some tag here>", "<here>", "<and here>")
+    license = "MIT"
+    author = "SEUGarfield zzg.seu@gmail.com"
+    url = ""
+    description = "A persistent file queue library"
+    topics = ("")
 
     # Binary configuration
     settings = "os", "compiler", "build_type", "arch"
@@ -20,7 +22,7 @@ class PersistentFileQueueRecipe(ConanFile):
     default_options = {"shared": False, "fPIC": True}
 
     # Sources are located in the same place as this recipe, copy them to the recipe
-    exports_sources = "CMakeLists.txt", "include/*"
+    exports_sources = "CMakeLists.txt", "src/*", "include/*", "tests/*", "cmake/*"
 
     def requirements(self):
         self.requires("spdlog/1.15.1")

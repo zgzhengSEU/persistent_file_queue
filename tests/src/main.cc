@@ -21,9 +21,9 @@ namespace {
 
     PersistentFileQueue persistent_file_queue("Tests");
 
-    CHECK(persistent_file_queue.greet(LanguageCode::EN) == "Hello, Tests!");
-    CHECK(persistent_file_queue.greet(LanguageCode::DE) == "Hallo Tests!");
-    CHECK(persistent_file_queue.greet(LanguageCode::ES) == "¡Hola Tests!");
-    CHECK(persistent_file_queue.greet(LanguageCode::FR) == "Bonjour Tests!");
+    EXPECT_EQ(persistent_file_queue.greet(LanguageCode::EN), "Hello, Tests!");
+    EXPECT_EQ(persistent_file_queue.greet(LanguageCode::DE), "Hallo Tests!");
+    EXPECT_EQ(persistent_file_queue.greet(LanguageCode::ES), "¡Hola Tests!");
+    EXPECT_EQ(persistent_file_queue.greet(LanguageCode::FR), "Bonjour Tests!");
   }
 }  // namespace

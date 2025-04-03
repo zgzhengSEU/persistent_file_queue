@@ -50,11 +50,15 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(${PROJECT_NAME} fmt::fmt spdlog::spdlog)
 
 # ---- Add tests ----
-if (NOT BUILD_TESTING STREQUAL OFF)
+if(NOT BUILD_TESTING STREQUAL OFF)
   message(STATUS "Building tests")
   add_subdirectory(tests)
 endif()
 
 # ---- Create an installable target ----
 set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER ${public_headers})
-install(TARGETS ${PROJECT_NAME})
+install(TARGETS ${PROJECT_NAME}
+        PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}"
+        RUNTIME DESTINATION bin
+)
+message(STATUS "Installing ${PROJECT_NAME} to ${CMAKE_INSTALL_INCLUDEDIR}")
