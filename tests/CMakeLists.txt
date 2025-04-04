@@ -14,7 +14,7 @@ include(../cmake/tools.cmake)
 find_package(GTest CONFIG REQUIRED)
 
 # ---- Create binary ----
-file(GLOB sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc)
+file(GLOB sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 add_executable(${PROJECT_NAME} ${sources})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 
