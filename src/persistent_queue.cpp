@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <vector>
 #include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -39,7 +39,8 @@ struct QueueHeader {
     uint64_t head;       // 队列头位置
     uint64_t tail;       // 队列尾位置
     uint64_t capacity;   // 队列容量
-    uint64_t size;       // 当前队列大小
+    uint64_t size;       // 当前队列大小（字节数）
+    uint64_t count;      // 当前队列中数据项的数量
     uint64_t block_size; // 块大小
     uint64_t max_size;   // 最大文件大小
     uint64_t write_pos;  // 当前写入位置
@@ -51,15 +52,62 @@ struct QueueHeader {
 
 class PersistentQueue::Impl {
 public:
-    Impl(std::string_view file_path, size_t block_size = 64 * 1024 * 1024) // 默认块大小 64MB
-        : file_path_(file_path), block_size_(block_size) {
+    Impl(std::string_view queue_name, std::string_view storage_dir, size_t block_size, std::string_view log_dir)
+        : block_size_(block_size) {
+        // 处理存储路径
+        fs::path storage_path = fs::path(storage_dir) / (std::string(queue_name) + ".dat");
+        file_path_ = storage_path.string();
+        
+        // 处理日志路径
+        std::string effective_log_path;
+        if (log_dir.empty()) {
+            effective_log_path = DEFAULT_LOG_DIR;
+        } else {
+            effective_log_path = log_dir;
+        }
+        
+        // 确保存储目录和日志目录存在
+        try {
+            fs::create_directories(storage_path.parent_path());
+            fs::create_directories(effective_log_path);
+        } catch (const fs::filesystem_error& e) {
+            spdlog::error("Failed to create directories: {}", e.what());
+            throw;
+        }
+        
+        // 使用固定的日志文件名
+        std::string log_file = fs::path(effective_log_path) / "persistent_queue.log";
+        
         // 初始化日志记录器
         logger_ = spdlog::get("persistent_queue");
         if (!logger_) {
-            logger_ = spdlog::stdout_color_mt("persistent_queue");
+            // 创建滚动日志文件，每个文件最大 1GB，不限制文件数量
+            const size_t max_file_size = 1024 * 1024 * 1024;  // 1GB
+            logger_ = spdlog::rotating_logger_mt("persistent_queue", log_file, max_file_size, 0);
+            // 设置日志格式
+            logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%t] [%v]");
+            // 设置日志级别
+            logger_->set_level(spdlog::level::debug);
+            // 设置日志刷新策略：立即刷新到磁盘
+            logger_->flush_on(spdlog::level::info);
         }
-        logger_->info("PersistentQueue created with file: {}", file_path);
-        Initialize();
+        logger_->info("PersistentQueue created with file: {}", file_path_);
+        
+        // 打开或创建文件
+        OpenFile();
+        
+        // 获取文件大小
+        const size_t file_size = GetFileSize();
+        
+        // 如果是新文件，初始化它
+        if (file_size == 0) {
+            logger_->info("Creating new queue file: {}", file_path_);
+            Initialize();
+        } else {
+            logger_->info("Opening existing queue file: {}", file_path_);
+            MapHeaderBlock();
+            RecoverFromFile();
+        }
     }
 
     ~Impl() {
@@ -74,6 +122,7 @@ public:
             CloseFile();
         }
         logger_->info("PersistentQueue destroyed");
+        spdlog::drop("persistent_queue");  // 关闭日志记录器
     }
 
     bool Enqueue(const std::vector<std::byte>& data) {
@@ -123,11 +172,13 @@ public:
         // 更新队列状态
         header_->write_pos = (header_->write_pos + total_size) % header_->capacity;
         header_->size += total_size;
+        header_->count += 1;  // 增加数据项计数
         
         // 更新头部信息
         FlushHeader();
 
-        logger_->debug("Data enqueued successfully, new size: {}", header_->size);
+        logger_->debug("Data enqueued successfully, new size: {}, count: {}", 
+                      header_->size, header_->count);
         return true;
     }
 
@@ -135,7 +186,7 @@ public:
         logger_->debug("Attempting to dequeue data");
         std::scoped_lock lock(mutex_);
         
-        if (header_->size == 0) {
+        if (header_->count == 0) {
             spdlog::debug("Queue is empty");
             return std::nullopt;  // 队列为空
         }
@@ -166,24 +217,33 @@ public:
         // 更新队列状态
         header_->read_pos = (header_->read_pos + total_size) % header_->capacity;
         header_->size -= total_size;
+        header_->count -= 1;  // 减少数据项计数
         
         // 更新头部信息
         FlushHeader();
 
-        logger_->debug("Data dequeued successfully, remaining size: {}", header_->size);
+        logger_->debug("Data dequeued successfully, remaining size: {}, count: {}", 
+                      header_->size, header_->count);
         return data;
     }
 
     size_t Size() const {
         std::scoped_lock lock(mutex_);
+        size_t count = header_->count;
+        logger_->debug("Current queue count: {}", count);
+        return count;
+    }
+
+    size_t TotalBytes() const {
+        std::scoped_lock lock(mutex_);
         size_t size = header_->size;
-        logger_->debug("Current queue size: {}", size);
+        logger_->debug("Current queue size in bytes: {}", size);
         return size;
     }
 
     bool Empty() const {
         std::scoped_lock lock(mutex_);
-        return header_->size == 0;
+        return header_->count == 0;
     }
 
 private:
@@ -204,49 +264,45 @@ private:
     };
 
     void Initialize() {
-        // 创建目录（如果不存在）
-        fs::path path(file_path_);
-        fs::create_directories(path.parent_path());
-
-        // 打开或创建文件
-        OpenFile();
-
-        // 获取文件大小
-        const size_t file_size = GetFileSize();
-
         // 计算初始块数（至少4个块，每个块64MB）
         const size_t initial_blocks = std::max<size_t>(4, (1ULL << 30) / block_size_); // 1GB / block_size
         const size_t initial_size = initial_blocks * block_size_;
 
-        // 如果文件为空，初始化文件
-        if (file_size == 0) {
-            ResizeFile(initial_size);
-        }
+        // 调整文件大小
+        ResizeFile(initial_size);
 
         // 映射头部块（使用单独的头部块）
         MapHeaderBlock();
         
-        // 如果是新文件，初始化头部
-        if (file_size == 0) {
-            InitializeNewFile(initial_size);
-        } else {
-            // 恢复现有文件
-            RecoverFromFile();
-        }
+        // 初始化头部
+        InitializeNewFile(initial_size);
     }
 
     void InitializeNewFile(size_t initial_size) {
+        // 初始化头部字段
         header_->head = block_size_;
         header_->tail = block_size_;
         header_->capacity = initial_size;
         header_->size = 0;
+        header_->count = 0;
         header_->block_size = block_size_;
         header_->max_size = 1ULL << 30; // 1GB
         header_->write_pos = block_size_;
         header_->read_pos = block_size_;
         header_->magic = MAGIC_NUMBER;
         header_->version = CURRENT_VERSION;
+        
+        // 计算头部校验和
+        header_->checksum = CalculateChecksum(
+            reinterpret_cast<const std::byte*>(header_),
+            sizeof(QueueHeader) - sizeof(std::byte)
+        );
+        
+        // 确保头部信息写入磁盘
         FlushHeader();
+        
+        logger_->info("New file initialized with size: {}, block size: {}", 
+                     initial_size, block_size_);
     }
 
     void RecoverFromFile() {
@@ -453,6 +509,7 @@ private:
         }
 #endif
         header_ = reinterpret_cast<QueueHeader*>(data);
+        logger_->debug("Header block mapped at address: {}", static_cast<void*>(header_));
     }
 
     void UnmapBlock(const MappedBlock& block) {
@@ -547,8 +604,11 @@ private:
 };
 
 // PersistentQueue 实现
-PersistentQueue::PersistentQueue(std::string_view file_path, size_t block_size)
-    : pimpl_(std::make_unique<Impl>(file_path, block_size)) {}
+PersistentQueue::PersistentQueue(std::string_view queue_name, 
+                               std::string_view storage_dir,
+                               size_t block_size,
+                               std::string_view log_dir)
+    : pimpl_(std::make_unique<Impl>(queue_name, storage_dir, block_size, log_dir)) {}
 
 PersistentQueue::~PersistentQueue() = default;
 
@@ -562,6 +622,10 @@ std::optional<std::vector<std::byte>> PersistentQueue::Dequeue() {
 
 size_t PersistentQueue::Size() const {
     return pimpl_->Size();
+}
+
+size_t PersistentQueue::TotalBytes() const {
+    return pimpl_->TotalBytes();
 }
 
 bool PersistentQueue::Empty() const {

@@ -18,8 +18,8 @@ class PersistentFileQueueRecipe(ConanFile):
 
     # Binary configuration
     settings = "os", "compiler", "build_type", "arch"
-    options = {"shared": [True, False], "fPIC": [True, False]}
-    default_options = {"shared": False, "fPIC": True}
+    options = {"shared": [True, False], "fPIC": [True, False], "benchmark": [True, False]}
+    default_options = {"shared": False, "fPIC": True, "benchmark": False}
 
     # Sources are located in the same place as this recipe, copy them to the recipe
     exports_sources = "CMakeLists.txt", "src/*", "include/*", "tests/*", "cmake/*"
@@ -27,6 +27,9 @@ class PersistentFileQueueRecipe(ConanFile):
     def requirements(self):
         self.requires("spdlog/1.15.1")
         self.test_requires("gtest/1.16.0")
+        if self.options.benchmark:
+            self.test_requires("benchmark/1.9.1")
+
     def config_options(self):
         if self.settings.os == "Windows":
             self.options.rm_safe("fPIC")
@@ -42,6 +45,8 @@ class PersistentFileQueueRecipe(ConanFile):
         deps = CMakeDeps(self)
         deps.generate()
         tc = CMakeToolchain(self)
+        if self.options.benchmark:
+            tc.variables["BENCHMARK_ENABLE"] = True
         tc.generate()
 
     def build(self):

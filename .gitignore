@@ -4,3 +4,4 @@
 .cache
 CMakeUserPresets.json
 build
+logs

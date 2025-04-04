@@ -55,6 +55,12 @@ if(NOT BUILD_TESTING STREQUAL OFF)
   add_subdirectory(tests)
 endif()
 
+# ---- Add benchmark ----
+if(BENCHMARK_ENABLE STREQUAL ON)
+  message(STATUS "Building benchmark")
+  add_subdirectory(benchmark)
+endif()
+
 # ---- Create an installable target ----
 set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER ${public_headers})
 install(TARGETS ${PROJECT_NAME}
